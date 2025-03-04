@@ -1,0 +1,60 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.4.3'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'org.example'
+version = '0.0.1-SNAPSHOT'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+
+    // Loại bỏ Logback hoàn toàn
+    all*.exclude group: 'ch.qos.logback', module: 'logback-classic'
+    all*.exclude group: 'ch.qos.logback', module: 'logback-core'
+    all*.exclude group: 'org.apache.logging.log4j', module: 'log4j-to-slf4j' // Loại bỏ log4j-to-slf4j nếu có
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web' // Chỉ khai báo một lần
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa' // Loại bỏ duplicate
+    runtimeOnly 'org.postgresql:postgresql'
+    implementation 'org.apache.spark:spark-core_2.12:3.4.0'
+    implementation 'org.apache.spark:spark-sql_2.12:3.4.0'
+    implementation 'org.apache.spark:spark-streaming-kafka-0-10_2.12:3.4.0'
+    implementation 'org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.0'
+    implementation 'org.springframework.kafka:spring-kafka'
+
+    // Log4j - Đảm bảo sử dụng phiên bản tương thích
+    implementation 'org.apache.logging.log4j:log4j-api:2.23.1' // Cập nhật phiên bản Log4j mới nhất
+    implementation 'org.apache.logging.log4j:log4j-core:2.23.1'
+    implementation 'org.apache.logging.log4j:log4j-slf4j2-impl:2.23.1'
+
+    // Lombok
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    // DevTools
+    developmentOnly 'org.springframework.boot:spring-boot-devtools'
+
+    // Test
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}
