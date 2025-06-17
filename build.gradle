@@ -29,28 +29,22 @@ repositories {
 }
 
 dependencies {
-    implementation 'org.springframework.boot:spring-boot-starter-web' // Chỉ khai báo một lần
-    implementation 'org.springframework.boot:spring-boot-starter-data-jpa' // Loại bỏ duplicate
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
     runtimeOnly 'org.postgresql:postgresql'
     implementation 'org.apache.spark:spark-core_2.12:3.4.0'
     implementation 'org.apache.spark:spark-sql_2.12:3.4.0'
     implementation 'org.apache.spark:spark-streaming-kafka-0-10_2.12:3.4.0'
     implementation 'org.apache.spark:spark-sql-kafka-0-10_2.12:3.4.0'
     implementation 'org.springframework.kafka:spring-kafka'
-
-    // Log4j - Đảm bảo sử dụng phiên bản tương thích
-    implementation 'org.apache.logging.log4j:log4j-api:2.23.1' // Cập nhật phiên bản Log4j mới nhất
+    implementation("org.springframework.boot:spring-boot-starter-actuator")
+    implementation("io.micrometer:micrometer-registry-prometheus")
+    implementation 'org.apache.logging.log4j:log4j-api:2.23.1'
     implementation 'org.apache.logging.log4j:log4j-core:2.23.1'
     implementation 'org.apache.logging.log4j:log4j-slf4j2-impl:2.23.1'
-
-    // Lombok
     compileOnly 'org.projectlombok:lombok'
     annotationProcessor 'org.projectlombok:lombok'
-
-    // DevTools
     developmentOnly 'org.springframework.boot:spring-boot-devtools'
-
-    // Test
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
 }

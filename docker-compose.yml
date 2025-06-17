@@ -41,6 +41,18 @@ services:
     networks:
       - app-network
 
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter
+    container_name: postgres-exporter
+    environment:
+      DATA_SOURCE_NAME: "postgresql://admin:password@postgres:5432/spark_demo_db?sslmode=disable"
+    ports:
+      - "9187:9187"
+    depends_on:
+      - postgres
+    networks:
+      - app-network
+
   # Apache Spark Master
   spark-master:
     image: bitnami/spark:3.4.0
@@ -48,8 +60,11 @@ services:
     environment:
       - SPARK_MODE=master
       - SPARK_MASTER_WEBUI_PORT=8080
+      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+    volumes:
+        - ./spark/metrics.properties:/opt/spark/conf/metrics.properties
     ports:
-      - "8080:8080"  # Spark Web UI
+      - "8082:8080"  # Spark Web UI
       - "7077:7077"  # Master port
     networks:
       - app-network
@@ -64,6 +79,9 @@ services:
       - SPARK_MODE=worker
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_WORKER_WEBUI_PORT=8081
+      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+    volumes:
+        - ./spark/metrics.properties:/opt/spark/conf/metrics.properties
     ports:
       - "8081:8081"  # Worker Web UI
     networks:
@@ -82,8 +100,36 @@ services:
     networks:
       - app-network
 
+  # Prometheus
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - app-network
+
+  # Grafana
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    volumes:
+      - grafana-data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    networks:
+      - app-network
+
 volumes:
   postgres-data:
+  grafana-data:
 
 networks:
   app-network:
