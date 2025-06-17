@@ -1,4 +1,15 @@
 services:
+  # spark-app:
+  #   build:
+  #     context: .        # Chính là thư mục chứa src, Dockerfile, build.gradle,...
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "8085:8085"
+  #   environment:
+  #     - SPRING_PROFILES_ACTIVE=docker
+  #   container_name: spark-demo-container
+  #   networks:
+  #     - app-network
   # PostgreSQL Database
   postgres:
     image: postgres:16
@@ -36,8 +47,11 @@ services:
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
     networks:
       - app-network
 
@@ -50,6 +64,17 @@ services:
       - "9187:9187"
     depends_on:
       - postgres
+    networks:
+      - app-network
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:latest
+    container_name: kafka-exporter
+    command: --kafka.server=kafka:29092
+    ports:
+      - "9308:9308"
+    depends_on:
+      - kafka
     networks:
       - app-network
 
@@ -126,6 +151,8 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     networks:
       - app-network
+
+
 
 volumes:
   postgres-data:
