@@ -8,7 +8,13 @@ timeout 60 bash -c 'until docker-compose exec kafka kafka-topics --bootstrap-ser
 
 # Create topic if not exists
 echo "Creating sales-topic..."
-docker-compose exec kafka kafka-topics --bootstrap-server localhost:9092 --create --topic sales-topic --partitions 3 --replication-factor 1 --if-not-exists
+for topic in low-price-topic mid-price-topic high-price-topic; do
+  echo "Creating $topic..."
+  docker-compose exec kafka kafka-topics \
+    --bootstrap-server localhost:9092 \
+    --create --topic $topic --partitions 6 --replication-factor 2 --if-not-exists
+done
+
 
 # List topics
 echo "Listing topics..."

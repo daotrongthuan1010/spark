@@ -47,21 +47,21 @@ products = [
 prices = {}
 for product in products:
     if any(keyword in product.lower() for keyword in ['laptop', 'macbook', 'pc', 'máy tính']):
-        price = random.uniform(10000000, 50000000)
+        price = random.uniform(500000, 50000000)
     elif any(keyword in product.lower() for keyword in ['điện thoại', 'iphone', 'ipad', 'tablet']):
-        price = random.uniform(5000000, 30000000)
+        price = random.uniform(200000, 30000000)
     elif any(keyword in product.lower() for keyword in ['tai nghe', 'headset', 'airpods']):
-        price = random.uniform(500000, 7000000)
+        price = random.uniform(50000, 7000000)
     elif any(keyword in product.lower() for keyword in ['nồi', 'quạt', 'máy']):
-        price = random.uniform(1000000, 10000000)
+        price = random.uniform(100000, 10000000)
     else:
         price = random.uniform(50000, 10000000)
     prices[product] = round(price, 2)
 
 # Tạo dữ liệu
 start_date = datetime(2024, 1, 1)
-batch_size = 10000
-total_records = 1000000
+batch_size = 1000
+total_records = 10000000
 
 print("Bắt đầu tạo dữ liệu...")
 

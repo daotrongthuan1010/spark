@@ -1,15 +1,4 @@
 services:
-  # spark-app:
-  #   build:
-  #     context: .        # Chính là thư mục chứa src, Dockerfile, build.gradle,...
-  #     dockerfile: Dockerfile
-  #   ports:
-  #     - "8085:8085"
-  #   environment:
-  #     - SPRING_PROFILES_ACTIVE=docker
-  #   container_name: spark-demo-container
-  #   networks:
-  #     - app-network
   # PostgreSQL Database
   postgres:
     image: postgres:16
@@ -24,8 +13,13 @@ services:
       - postgres-data:/var/lib/postgresql/data
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin -d spark_demo_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  # Apache Kafka
+  # Zookeeper for Kafka
   zookeeper:
     image: confluentinc/cp-zookeeper:7.3.0
     container_name: zookeeper
@@ -36,25 +30,67 @@ services:
       - "2181:2181"
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "echo stat | nc localhost 2181"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
-  kafka:
+  # Kafka Broker 1
+  kafka1:
     image: confluentinc/cp-kafka:7.3.0
-    container_name: kafka
+    container_name: kafka1
     depends_on:
-      - zookeeper
+      zookeeper:
+        condition: service_healthy
     ports:
       - "9092:9092"
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka:29092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9092,PLAINTEXT_INTERNAL://kafka1:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
       KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_NUM_PARTITIONS: 3  # Tăng số partition mặc định
+      KAFKA_LOG_RETENTION_HOURS: 24  # Giữ log 24 giờ
     networks:
       - app-network
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh --list --bootstrap-server localhost:9092"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
 
+  # Kafka Broker 2
+  kafka2:
+    image: confluentinc/cp-kafka:7.3.0
+    container_name: kafka2
+    depends_on:
+      zookeeper:
+        condition: service_healthy
+    ports:
+      - "9093:9093"
+    environment:
+      KAFKA_BROKER_ID: 2
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9093,PLAINTEXT_INTERNAL://kafka2:29093
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_INTERNAL:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT_INTERNAL
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 2
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: 'true'
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_LOG_RETENTION_HOURS: 24
+    networks:
+      - app-network
+    healthcheck:
+      test: ["CMD", "kafka-topics.sh --list --bootstrap-server localhost:9093"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
+  # PostgreSQL Exporter
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter
     container_name: postgres-exporter
@@ -63,40 +99,58 @@ services:
     ports:
       - "9187:9187"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     networks:
       - app-network
 
+  # Kafka Exporter
   kafka-exporter:
     image: danielqsj/kafka-exporter:latest
     container_name: kafka-exporter
-    command: --kafka.server=kafka:29092
+    command:
+      - "--kafka.server=kafka1:29092"
+      - "--kafka.server=kafka2:29093"  # Thêm cả kafka2
+      - "--web.listen-address=:9308"
+      - "--topic.filter=.*"
+      - "--group.filter=.*"
+      - "--log.level=info"
     ports:
       - "9308:9308"
     depends_on:
-      - kafka
+      - kafka1
+      - kafka2
     networks:
       - app-network
 
-  # Apache Spark Master
   spark-master:
-    image: bitnami/spark:3.4.0
+    image: bitnami/spark:3.5.0
     container_name: spark-master
     environment:
       - SPARK_MODE=master
       - SPARK_MASTER_WEBUI_PORT=8080
-      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+      - SPARK_DAEMON_JAVA_OPTS=-javaagent:/opt/spark/exporter/jmx_prometheus_javaagent.jar=8090:/opt/spark/exporter/spark-prometheus.yaml -Djava.security.manager=allow --add-opens=java.base/java.nio=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
     volumes:
-        - ./spark/metrics.properties:/opt/spark/conf/metrics.properties
+      - ./spark/metrics.properties:/opt/spark/conf/metrics.properties
+      - ./monitoring/jmx_prometheus_javaagent.jar:/opt/spark/exporter/jmx_prometheus_javaagent.jar
+      - ./monitoring/spark-prometheus.yaml:/opt/spark/exporter/spark-prometheus.yaml
     ports:
-      - "8082:8080"  # Spark Web UI
-      - "7077:7077"  # Master port
+      - "8082:8080"   # Web UI
+      - "7077:7077"   # Spark master port
+      - "8090:8090"   # Prometheus exporter port
+    deploy:
+      resources:
+        limits:
+          memory: 2g
+    depends_on:
+      - kafka1
+      - kafka2
     networks:
       - app-network
 
-  # Apache Spark Worker
+
   spark-worker:
-    image: bitnami/spark:3.4.0
+    image: bitnami/spark:3.5.0
     container_name: spark-worker
     depends_on:
       - spark-master
@@ -104,20 +158,28 @@ services:
       - SPARK_MODE=worker
       - SPARK_MASTER=spark://spark-master:7077
       - SPARK_WORKER_WEBUI_PORT=8081
-      - SPARK_METRICS_CONF=/opt/spark/conf/metrics.properties
+      - SPARK_DAEMON_JAVA_OPTS=-javaagent:/opt/spark/exporter/jmx_prometheus_javaagent.jar=8090:/opt/spark/exporter/spark-prometheus.yaml -Djava.security.manager=allow --add-opens=java.base/java.nio=ALL-UNNAMED --add-exports=java.base/sun.nio.ch=ALL-UNNAMED
     volumes:
-        - ./spark/metrics.properties:/opt/spark/conf/metrics.properties
+      - ./spark/metrics.properties:/opt/spark/conf/metrics.properties
+      - ./monitoring/jmx_prometheus_javaagent.jar:/opt/spark/exporter/jmx_prometheus_javaagent.jar
+      - ./monitoring/spark-prometheus.yaml:/opt/spark/exporter/spark-prometheus.yaml
     ports:
-      - "8081:8081"  # Worker Web UI
+      - "8081:8081"
+      - "8091:8091"
+    deploy:
+      resources:
+        limits:
+          memory: 2g
     networks:
       - app-network
 
-  # Service để tạo dữ liệu mẫu trong PostgreSQL
+  # Data Generator
   data-generator:
     image: python:3.9-slim
     container_name: data-generator
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       - ./scripts:/scripts
     command: >
@@ -133,6 +195,11 @@ services:
       - "9090:9090"
     volumes:
       - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    depends_on:
+      - postgres-exporter
+      - kafka-exporter
+      - spark-master
+      - spark-worker
     networks:
       - app-network
 
@@ -151,8 +218,6 @@ services:
       - GF_SECURITY_ADMIN_PASSWORD=admin
     networks:
       - app-network
-
-
 
 volumes:
   postgres-data:

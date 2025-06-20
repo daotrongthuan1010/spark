@@ -14,11 +14,18 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
+import java.math.BigDecimal;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.TimeoutException;
 
 @Service
 public class SparkProcessingService {
+
+    @Autowired
+    private ExecutorService executorService;
 
     @Autowired
     private KafkaProducerService kafkaProducerService;
@@ -36,23 +43,20 @@ public class SparkProcessingService {
         // Cấu hình Spark để kết nối với Spark Master trong Docker
         SparkConf conf = new SparkConf()
                 .setAppName("SparkDemo")
-                .setMaster(sparkMaster)
-                .set("spark.driver.host", "localhost")
+                .setMaster("local[*]")
+                .set("spark.driver.host", "host.docker.internal") // Hoặc IP của host
                 .set("spark.streaming.stopGracefullyOnShutdown", "true");
 
-        // Khởi tạo Spark Session
         SparkSession spark = SparkSession.builder()
                 .config(conf)
                 .getOrCreate();
 
-        // Định nghĩa schema cho dữ liệu từ Kafka (giả sử dữ liệu là JSON)
         StructType schema = new StructType()
                 .add("product", "string")
                 .add("quantity", "integer")
                 .add("price", "double")
                 .add("timestamp", "timestamp");
 
-        // Đọc dữ liệu từ Kafka bằng Spark Structured Streaming
         Dataset<Row> salesData = spark.readStream()
                 .format("kafka")
                 .option("kafka.bootstrap.servers", kafkaBootstrapServers)
@@ -65,7 +69,6 @@ public class SparkProcessingService {
                 ).as("data"))
                 .select("data.*");
 
-        // Xử lý dữ liệu (tính tổng doanh thu theo sản phẩm)
         Dataset<Row> salesByProduct = salesData.groupBy("product")
                 .agg(
                         org.apache.spark.sql.functions.sum(
@@ -76,38 +79,60 @@ public class SparkProcessingService {
                 )
                 .orderBy(org.apache.spark.sql.functions.col("total_revenue").desc());
 
-        // Hiển thị kết quả trên console (streaming)
         salesByProduct.writeStream()
                 .outputMode("complete")
                 .format("console")
                 .start();
 
-        // Lưu kết quả vào thư mục output (batch hoặc streaming)
         salesByProduct.write()
                 .format("csv")
                 .option("header", "true")
                 .save("/output/sales_by_product");
 
-        // Chờ streaming kết thúc (nếu cần)
         spark.streams().awaitAnyTermination();
 
-        // Đóng Spark Session
         spark.stop();
     }
 
+     // Cấu hình thread pool
     public void sendDataToKafka() {
-        // Sử dụng paging hoặc batch để đọc dữ liệu từ PostgreSQL
-        int pageSize = 1000; // Số bản ghi mỗi batch
-        long totalRecords = salesDataRepository.count(); // Tổng số bản ghi
+        int pageSize = 100000;
+        long totalRecords = salesDataRepository.count();
+        List<CompletableFuture<Void>> futures = new ArrayList<>();
+
         for (long offset = 0; offset < totalRecords; offset += pageSize) {
-            Page<SalesData> salesPage = salesDataRepository.findAll(PageRequest.of((int) (offset / pageSize), pageSize));
-            for (SalesData sale : salesPage) {
-                String jsonData = String.format(
-                        "{\"product\":\"%s\",\"quantity\":%d,\"price\":%.2f,\"timestamp\":\"%s\"}",
-                        sale.getProduct(), sale.getQuantity(), sale.getPrice(), sale.getTimestamp()
-                );
-                kafkaProducerService.sendSalesData("sales-topic", jsonData);
-            }
+            int pageIndex = (int) (offset / pageSize);
+
+            CompletableFuture<Void> future = CompletableFuture.runAsync(() -> {
+                Page<SalesData> salesPage = salesDataRepository.findAll(PageRequest.of(pageIndex, pageSize));
+                for (SalesData sale : salesPage) {
+                    String topic = getKafkaTopicByPrice(sale.getPrice());
+
+                    String jsonData = String.format(
+                            "{\"product\":\"%s\",\"quantity\":%d,\"price\":%.2f,\"timestamp\":\"%s\"}",
+                            sale.getProduct(), sale.getQuantity(), sale.getPrice(), sale.getTimestamp()
+                    );
+
+                    kafkaProducerService.sendSalesData(topic, jsonData);
+                }
+            }, executorService);
+
+            futures.add(future);
+        }
+
+        CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+    }
+
+    // Hàm hỗ trợ phân loại topic theo mức giá
+    private String getKafkaTopicByPrice(BigDecimal price) {
+        if (price.compareTo(BigDecimal.valueOf(1_000_000)) < 0) {
+            return "low-price-topic";
+        } else if (price.compareTo(BigDecimal.valueOf(10_000_000)) < 0) {
+            return "mid-price-topic";
+        } else {
+            return "high-price-topic";
         }
     }
+
+
 }
